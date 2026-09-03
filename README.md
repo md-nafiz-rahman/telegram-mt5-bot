@@ -4,7 +4,7 @@ A Python bot that listens for trade signals in a Telegram channel and automatica
 
 > ⚠️ **Disclaimer:** This project was built for personal learning and experimentation with API integration and automation. It is not financial advice, and automated trading carries significant financial risk.
 >
-> **This repository is for demonstration purposes only. It is not intended to be installed and run using real trading account. It was built and tested using a demo trading account.**
+> **This repository is for demonstration purposes only. It is not intended to be installed and run using a real trading account. It was built and tested using a demo trading account.** A past bug (see Known Issues below) caused unlimited duplicate trades from a single signal, this is a direct example of the kind of risk automated trading carries.
 
 ## How It Works
 
@@ -56,3 +56,14 @@ SELL XAUUSD 2664.2
 - No reconnect logic if the Telegram or MT5 connection drops
 - Position monitoring uses simple polling rather than event-driven updates
 - No logging to file, currently only prints to console
+
+## Known Issues (Fixed)
+
+### Duplicate trade execution on repeated message events
+
+**Problem:** Telegram's message event could occasionally fire more than once for what appeared to be a single signal for example, when the signal sender replied to their own earlier message, or when Telegram's client resent an event. Since the original code had no way of recognising that it has acted upon the message to open trades, each trigger opened a fresh set of three trades. In one instance, this caused MetaTrader to open trades in an unlimited loop from a single signal.
+
+**Fix:**
+- Added a `TRADED_MESSAGE_IDS` set that tracks every Telegram message ID already acted on. The handler checks this before doing anything else, and exits immediately if the message has already been traded.
+- Added a `MAX_MESSAGE_AGE_SECONDS` safety check (default: 300 seconds) that ignores any message older than 5 minutes by the time it's processed, as an extra safeguard against delayed or replayed events.
+- If any of the three orders fails to execute, the message ID is removed from the tracked set, allowing the signal to be retried rather than getting permanently blocked by a failed attempt.

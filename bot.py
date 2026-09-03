@@ -1,5 +1,6 @@
 import time
 import re
+from datetime import datetime
 from telethon import TelegramClient, events
 import MetaTrader5 as mt5
 
@@ -8,6 +9,12 @@ from config import (
     CHANNEL_USERNAME, MT5_LOGIN_ID, MT5_PASSWORD, MT5_SERVER,
     LOT_SIZE, DEVIATION, POLLING_INTERVAL
 )
+
+
+# Duplicate Message Protection
+
+TRADED_MESSAGE_IDS = set()  # Store message IDs already traded
+MAX_MESSAGE_AGE_SECONDS = 300  # Only trade messages from the last 5 minutes 
 
 # global variables to store trade tickets and their targets
 trade_tickets = {}
@@ -30,6 +37,17 @@ def initialize_mt5():
     return True
 
 def parse_signal(message_text):
+    """
+    Given the format:
+    SIGNAL ALERT
+
+    SELL XAUUSD 2664.2
+
+    🤑TP1: 2663.0
+    🤑TP2: 2661.5
+    🤑TP3: 2658.0
+    🔴SL: 2670.0
+    """
     direction_pattern = r"(BUY|SELL)\s+([A-Za-z0-9]+)\s+(\d+\.\d+)"
     direction_match = re.search(direction_pattern, message_text, re.IGNORECASE)
     if not direction_match:
@@ -172,9 +190,30 @@ def monitor_trades(direction, tp_levels, trade_tickets):
 @client.on(events.NewMessage(chats=CHANNEL_USERNAME))
 async def handler(event):
     message = event.message.message
+    message_id = event.message.id
+    message_date = event.message.date
+
+    # Prevent duplicate trades
+    if message_id in TRADED_MESSAGE_IDS:
+        print(f"⚠️ Message ID {message_id} already traded (duplicate). Ignoring.")
+        return
+
+    # Safety check, ignore messages that are too old
+    current_time = datetime.now()
+    message_time = message_date.replace(tzinfo=None)
+    message_age = (current_time - message_time).total_seconds()
+
+    if message_age > MAX_MESSAGE_AGE_SECONDS:
+        print(f"⚠️ Message is {message_age} seconds old (max: {MAX_MESSAGE_AGE_SECONDS}s). Ignoring old signal.")
+        return
+
     signal = parse_signal(message)
     if signal:
-        print("Signal received:", signal)
+        print(f"✅ Signal received: {signal}")
+        print(f"   Message ID: {message_id}, Age: {message_age}s")
+
+        # Mark message as traded before execution to prevent re-entry
+        TRADED_MESSAGE_IDS.add(message_id)
 
         tp_levels.clear()
         tp_levels['symbol'] = signal['symbol']
@@ -183,27 +222,39 @@ async def handler(event):
         tp_levels['tp3'] = signal['tp3']
 
         trade_tickets.clear()
+
         tp1_ticket = send_order(signal['symbol'], signal['direction'], signal['entry'], signal['sl'], signal['tp1'])
         if tp1_ticket is None:
+            print("❌ Failed to execute TP1 order. Aborting trade sequence.")
+            TRADED_MESSAGE_IDS.discard(message_id)
             return
         trade_tickets['tp1'] = tp1_ticket
 
         tp2_ticket = send_order(signal['symbol'], signal['direction'], signal['entry'], signal['sl'], signal['tp2'])
         if tp2_ticket is None:
+            print("❌ Failed to execute TP2 order. Aborting trade sequence.")
+            TRADED_MESSAGE_IDS.discard(message_id)
             return
         trade_tickets['tp2'] = tp2_ticket
 
         tp3_ticket = send_order(signal['symbol'], signal['direction'], signal['entry'], signal['sl'], signal['tp3'])
         if tp3_ticket is None:
+            print("❌ Failed to execute TP3 order. Aborting trade sequence.")
+            TRADED_MESSAGE_IDS.discard(message_id)
             return
         trade_tickets['tp3'] = tp3_ticket
 
+        print(f"✅ All 3 orders executed. Starting monitoring...")
         monitor_trades(signal['direction'], tp_levels, trade_tickets)
+    else:
+        print(f"⚠️ Message doesn't contain valid signal format.")
 
 if __name__ == "__main__":
     if not initialize_mt5():
         exit("MT5 initialization failed.")
 
     with client:
-        print("Listening for signals...")
+        print("✅ Listening for signals...")
+        print(f"   Max message age: {MAX_MESSAGE_AGE_SECONDS} seconds")
+        print("   Duplicate protection: ENABLED")
         client.run_until_disconnected()
