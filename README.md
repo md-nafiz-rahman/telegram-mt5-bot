@@ -42,6 +42,12 @@ This implements a common scale-out risk management approach: rather than closing
    python bot.py
 ```
 
+## Testing & Verification
+
+- `test_signal_parsing.py` - automated tests verifying signal parsing handles valid signals, incomplete signals, and non-signal messages correctly.
+- `test_mt5_connection.py` - manual script to verify your MT5 credentials and connection are working.
+- `test_telegram_connection.py` - manual script to verify your Telegram API credentials are working and authenticate correctly.
+
 ## Signal Format Expected
 
 SELL XAUUSD 2664.2
