@@ -1,6 +1,6 @@
 import time
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from telethon import TelegramClient, events
 import MetaTrader5 as mt5
 
@@ -14,7 +14,7 @@ from config import (
 # Duplicate Message Protection
 
 TRADED_MESSAGE_IDS = set()  # Store message IDs already traded
-MAX_MESSAGE_AGE_SECONDS = 300  # Only trade messages from the last 5 minutes 
+MAX_MESSAGE_AGE_SECONDS = 300  # Only trade messages from the last 5 minutes
 
 # global variables to store trade tickets and their targets
 trade_tickets = {}
@@ -199,9 +199,8 @@ async def handler(event):
         return
 
     # Safety check, ignore messages that are too old
-    current_time = datetime.now()
-    message_time = message_date.replace(tzinfo=None)
-    message_age = (current_time - message_time).total_seconds()
+    current_time = datetime.now(timezone.utc)
+    message_age = (current_time - message_date).total_seconds()
 
     if message_age > MAX_MESSAGE_AGE_SECONDS:
         print(f"⚠️ Message is {message_age} seconds old (max: {MAX_MESSAGE_AGE_SECONDS}s). Ignoring old signal.")
